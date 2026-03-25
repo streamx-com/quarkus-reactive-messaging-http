@@ -6,7 +6,10 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.microprofile.reactive.messaging.Message;
@@ -40,14 +43,21 @@ class WebSocketSink extends AbstractSink {
     private final boolean ssl;
     private final String serializer;
     private final SerializerFactoryBase serializerFactory;
+    private final AtomicReference<WebSocket> websocket = new AtomicReference<>();
+    private final Map<String, CompletableFuture<Void>> ackById = new ConcurrentHashMap<>();
+    private final MessageIdProvider messageIdProvider;
+
+    //    private final MessageId
 
     WebSocketSink(Vertx vertx, URI uri, String serializer, SerializerFactoryBase serializerFactory,
             int maxRetries, Optional<Duration> delay, double jitter,
-            Optional<TlsConfiguration> tlsConfiguration, long inflights, boolean waitForCompletion) {
+            Optional<TlsConfiguration> tlsConfiguration, long inflights, boolean waitForCompletion,
+            MessageIdProvider messageIdProvider) {
         super(log, uri.toString(), maxRetries, jitter, delay, inflights, waitForCompletion);
         this.uri = uri;
         this.serializerFactory = serializerFactory;
         this.serializer = serializer;
+        this.messageIdProvider = messageIdProvider;
 
         String scheme = uri.getScheme().toLowerCase(Locale.getDefault());
         if (!supportedSchemes.contains(scheme)) {
@@ -62,22 +72,28 @@ class WebSocketSink extends AbstractSink {
         webSocketClient = vertx.createWebSocketClient(options);
     }
 
-    private final AtomicReference<WebSocket> websocket = new AtomicReference<>();
-
     private void connect(WebSocketConnectOptions options, Handler<AsyncResult<WebSocket>> handler) {
         log.debug("using a new web socket connection");
         webSocketClient.connect(options, connectResult -> {
             if (connectResult.succeeded()) {
-                WebSocket result = connectResult.result();
-                WebSocket oldWs = websocket.getAndSet(result);
+                WebSocket newWs = connectResult.result();
+                WebSocket oldWs = websocket.getAndSet(newWs);
                 if (oldWs != null) { // someone might have initialized it in parallel
                     log.debug("Closing previous web socket connection");
                     oldWs.close();
                 }
 
-                result.closeHandler(ignored -> {
+                newWs.closeHandler(ignored -> {
                     log.debug("WebSocket disconnected");
-                    websocket.compareAndSet(result, null);
+                    websocket.compareAndSet(newWs, null);
+                });
+                newWs.textMessageHandler(responseText -> {
+                    Response response = parseResponse(responseText);
+                    if (response != null) {
+                        handleResponse(response);
+                    } else {
+                        log.tracef("Received unsupported response: %s", responseText);
+                    }
                 });
                 handler.handle(connectResult);
             } else {
@@ -91,8 +107,12 @@ class WebSocketSink extends AbstractSink {
         WebSocketConnectOptions options = options();
         Serializer<Object> serializer = serializerFactory.getSerializer(this.serializer, message.getPayload());
         Buffer serialized = serializer.serialize(message.getPayload());
+        String messageId = getMessageId(message);
 
-        return AsyncResultUni.toUni(
+        // TODO clear old entries from map? some leftovers may be cased by the other end errors or no response
+        // TODO test how retry in abstract works. is handler below re-run? Test if retry works after change.
+        Uni<Void> ack = registerAck(messageId);
+        Uni<Void> send = AsyncResultUni.toUni(
                 // all happening in "one step" so that the retry mechanism is applied to the connection too
                 handler -> {
                     WebSocket ws = websocket.get();
@@ -109,6 +129,7 @@ class WebSocketSink extends AbstractSink {
                         });
                     }
                 });
+        return Uni.combine().all().unis(send, ack).discardItems();
     }
 
     private WebSocketConnectOptions options() {
@@ -130,5 +151,62 @@ class WebSocketSink extends AbstractSink {
             }
             handler.handle(writeResult);
         });
+    }
+
+    private String getMessageId(Message<?> message) {
+        if (messageIdProvider != null) {
+            return messageIdProvider.getMessageId(message);
+        }
+        return null;
+    }
+
+    private Uni<Void> registerAck(String messageId) {
+        if (messageId != null) {
+            CompletableFuture<Void> completionStage = new CompletableFuture<>();
+            ackById.put(messageId, completionStage);
+            return Uni.createFrom().completionStage(completionStage);
+        } else {
+            return Uni.createFrom().voidItem();
+        }
+    }
+
+    private void handleResponse(Response response) {
+        CompletableFuture<Void> ack = ackById.remove(response.messageId());
+        if (ack != null) {
+            if (response.isAck()) {
+                log.tracef("Completing ack handler for message id: %s",
+                        response.messageId());
+                ack.complete(null);
+            } else {
+                log.tracef("Completing ack handler for message id: %s",
+                        response.messageId());
+                ack.completeExceptionally(
+                        new RuntimeException("Nack received for message id: " + response.messageId()));
+            }
+        } else {
+            log.tracef("No ack handler for message id: %s", response.messageId());
+        }
+    }
+
+    // TODO use same class and constants in ReactiveWebSocketHandlerBean
+    private Response parseResponse(String response) {
+        if (response == null) {
+            return null;
+        }
+        String[] parts = response.split("\n");
+        if (parts.length != 2) {
+            return null;
+        }
+        if (parts[0].equalsIgnoreCase("ACK")) {
+            return new Response(true, parts[1]);
+        } else if (parts[0].equalsIgnoreCase("NACK")) {
+            return new Response(false, parts[1]);
+        } else {
+            return null;
+        }
+    }
+
+    private record Response(boolean isAck, String messageId) {
+
     }
 }
