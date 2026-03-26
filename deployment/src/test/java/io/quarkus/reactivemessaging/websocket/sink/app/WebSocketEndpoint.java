@@ -47,9 +47,9 @@ public class WebSocketEndpoint {
         messages.add(messageString);
         lock.triggerWhenUnlocked(() -> {
             if (messageString.endsWith("for ACK test")) {
-                sessions.get(0).getAsyncRemote().sendText("ACK\n" + messageString);
+                sessions.get(0).getAsyncRemote().sendText("ACK\nid:" + messageString);
             } else if (messageString.endsWith("for NACK test")) {
-                sessions.get(0).getAsyncRemote().sendText("NACK\n" + messageString);
+                sessions.get(0).getAsyncRemote().sendText("NACK\nid:" + messageString);
             } else {
                 sessions.get(0).getAsyncRemote().sendText("ACK");
             }

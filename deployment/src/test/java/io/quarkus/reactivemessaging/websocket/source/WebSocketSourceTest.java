@@ -79,12 +79,12 @@ class WebSocketSourceTest {
 
     @Test
     void shouldAck() {
-        shouldAckOrNack("test-message", "ACK\ntest-message");
+        shouldAckOrNack("test-message", "ACK\nid:test-message");
     }
 
     @Test
     void shouldNack() {
-        shouldAckOrNack("test-message for NACK test", "NACK\ntest-message for NACK test");
+        shouldAckOrNack("test-message for NACK test", "NACK\nid:test-message for NACK test");
     }
 
     void shouldAckOrNack(String testPayload, String expectedResponse) {

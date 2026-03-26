@@ -90,14 +90,17 @@ class WebSocketSink extends AbstractSink {
                     });
                     websocket.compareAndSet(newWs, null);
                 });
-                newWs.textMessageHandler(responseText -> {
-                    Response response = parseResponse(responseText);
-                    if (response != null) {
-                        handleResponse(response);
-                    } else {
-                        log.tracef("Received unsupported response: %s", responseText);
-                    }
-                });
+                if (messageIdProvider != null) {
+                    newWs.textMessageHandler(responseText -> {
+                        WebSocketResponse response = WebSocketResponse
+                                .parseResponseWithMessageId(responseText);
+                        if (response != null) {
+                            handleResponse(response);
+                        } else {
+                            log.tracef("Received unsupported response: %s", responseText);
+                        }
+                    });
+                }
                 handler.handle(connectResult);
             } else {
                 handler.handle(Future.failedFuture(connectResult.cause()));
@@ -110,10 +113,9 @@ class WebSocketSink extends AbstractSink {
         WebSocketConnectOptions options = options();
         Serializer<Object> serializer = serializerFactory.getSerializer(this.serializer, message.getPayload());
         Buffer serialized = serializer.serialize(message.getPayload());
-        String messageId = getMessageId(message);
 
         // TODO test how retry in abstract works. is handler below re-run? Test if retry works after change.
-        Uni<Void> ack = registerAck(messageId);
+        Uni<Void> ack = registerAckHandler(message);
         Uni<Void> send = AsyncResultUni.toUni(
                 // all happening in "one step" so that the retry mechanism is applied to the connection too
                 handler -> {
@@ -131,7 +133,11 @@ class WebSocketSink extends AbstractSink {
                         });
                     }
                 });
-        return Uni.combine().all().unis(send, ack).discardItems();
+        if (ack != null) {
+            return Uni.combine().all().unis(send, ack).discardItems();
+        } else {
+            return send;
+        }
     }
 
     private WebSocketConnectOptions options() {
@@ -155,60 +161,35 @@ class WebSocketSink extends AbstractSink {
         });
     }
 
-    private String getMessageId(Message<?> message) {
+    private Uni<Void> registerAckHandler(Message<?> message) {
         if (messageIdProvider != null) {
-            return messageIdProvider.getMessageId(message);
+            String messageId = messageIdProvider.getMessageId(message);
+            if (messageId != null) {
+                log.tracef("Registering ack handler for message id: %s", messageId);
+                CompletableFuture<Void> completionStage = new CompletableFuture<>();
+                ackHandlerById.put(messageId, completionStage);
+                return Uni.createFrom().completionStage(completionStage);
+            }
         }
         return null;
     }
 
-    private Uni<Void> registerAck(String messageId) {
-        if (messageId != null) {
-            CompletableFuture<Void> completionStage = new CompletableFuture<>();
-            ackHandlerById.put(messageId, completionStage);
-            return Uni.createFrom().completionStage(completionStage);
-        } else {
-            return Uni.createFrom().voidItem();
-        }
-    }
-
-    private void handleResponse(Response response) {
-        CompletableFuture<Void> ack = ackHandlerById.remove(response.messageId());
+    private void handleResponse(WebSocketResponse response) {
+        CompletableFuture<Void> ack = ackHandlerById.remove(response.getMessageId());
         if (ack != null) {
             if (response.isAck()) {
                 log.tracef("Completing ack handler for message id: %s",
-                        response.messageId());
+                        response.getMessageId());
                 ack.complete(null);
             } else {
                 log.debugf("Completing exceptionally ack handler for message id: %s",
-                        response.messageId());
+                        response.getMessageId());
                 ack.completeExceptionally(
-                        new RuntimeException("Nack received for message id: " + response.messageId()));
+                        new RuntimeException("Nack received for message id: " + response.getMessageId()));
             }
         } else {
-            log.tracef("No ack handler for message id: %s", response.messageId());
+            log.tracef("No ack handler for message id: %s", response.getMessageId());
         }
     }
 
-    // TODO use same class and constants in ReactiveWebSocketHandlerBean
-    private Response parseResponse(String response) {
-        if (response == null) {
-            return null;
-        }
-        String[] parts = response.split("\n");
-        if (parts.length != 2) {
-            return null;
-        }
-        if (parts[0].equalsIgnoreCase("ACK")) {
-            return new Response(true, parts[1]);
-        } else if (parts[0].equalsIgnoreCase("NACK")) {
-            return new Response(false, parts[1]);
-        } else {
-            return null;
-        }
-    }
-
-    private record Response(boolean isAck, String messageId) {
-
-    }
 }

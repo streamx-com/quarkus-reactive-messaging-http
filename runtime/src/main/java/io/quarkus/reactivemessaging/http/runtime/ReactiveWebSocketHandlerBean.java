@@ -100,18 +100,16 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
 
     private Uni<Void> onAck(ServerWebSocket serverWebSocket, String messageId) {
         return AsyncResultUni.toUni(handler -> {
-            String response = "ACK" + (messageId != null ? "\n" + messageId : "");
-            handler.handle(serverWebSocket.writeTextMessage(response));
+            handler.handle(serverWebSocket.writeTextMessage(WebSocketResponse.ack(messageId).toString()));
         });
     }
 
     private Uni<Void> onNack(ServerWebSocket serverWebSocket, Throwable error, String messageId) {
         return AsyncResultUni.toUni(handler -> {
-            String response = "NACK" + (messageId != null ? "\n" + messageId : "");
             String logMessage = "Failed to process incoming web socket message."
                     + (messageId != null ? "Message id: " + messageId : "");
             log(error, logMessage);
-            handler.handle(serverWebSocket.writeTextMessage(response));
+            handler.handle(serverWebSocket.writeTextMessage(WebSocketResponse.nack(messageId).toString()));
         });
     }
 
