@@ -5,14 +5,13 @@ on:
 
 permissions:
   id-token: write
-  packages: write
   contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - id: 'auth'
         name: 'Authenticate to Google Cloud'
@@ -22,19 +21,7 @@ jobs:
           service_account: ${{ secrets.GCP_STREAMX_RELEASES_RELEASE_DEPLOY_SA }}
           token_format: access_token
 
-      - name: Login to GAR
-        uses: docker/login-action@v2
-        with:
-          registry: ${{ vars.GAR_DOCKER_REGISTRY }}
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }}
 
-      - name: Log in to the GH Container registry
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure Git
         run: |
@@ -45,10 +32,10 @@ jobs:
           chmod 0600 ~/.ssh/id_rsa
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v5
         with:
           java-version: '17'
-          distribution: 'adopt'
+          distribution: 'temurin'
           cache: 'maven'
 
       - name: Release prepare
