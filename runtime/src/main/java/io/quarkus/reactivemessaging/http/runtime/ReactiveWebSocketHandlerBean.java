@@ -13,7 +13,9 @@ import io.quarkus.reactivemessaging.http.runtime.config.ReactiveHttpConfig;
 import io.quarkus.reactivemessaging.http.runtime.config.WebSocketStreamConfig;
 import io.quarkus.reactivemessaging.http.runtime.serializers.DeserializerFactoryBase;
 import io.smallrye.mutiny.Multi;
+import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.MultiEmitter;
+import io.smallrye.mutiny.vertx.AsyncResultUni;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.ext.web.RoutingContext;
@@ -59,11 +61,10 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
                                             RequestMetadata requestMetadata = new RequestMetadata(event);
                                             String messageId = getMessageId(streamConfig.messageIdProvider(), payload,
                                                     requestMetadata);
-                                            // TODO return result of serverWebSocket.write in WebSocketMessage ack and nack?
                                             emitter.emit(new WebSocketMessage<>(
                                                     payload, requestMetadata,
-                                                    () -> onAck(serverWebSocket, messageId),
-                                                    error -> onNack(serverWebSocket, error, messageId)));
+                                                    () -> onAck(serverWebSocket, messageId).subscribeAsCompletionStage(),
+                                                    error -> onNack(serverWebSocket, error, messageId).subscribeAsCompletionStage()));
                                         } catch (Exception error) {
                                             guard.dequeue();
                                             onUnexpectedError(serverWebSocket, error, "Emitting message failed");
@@ -96,17 +97,21 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
         return config.getWebSocketConfigs();
     }
 
-    private void onAck(ServerWebSocket serverWebSocket, String messageId) {
-        String response = "ACK" + (messageId != null ? "\n" + messageId : "");
-        serverWebSocket.writeTextMessage(response);
+    private Uni<Void> onAck(ServerWebSocket serverWebSocket, String messageId) {
+        return AsyncResultUni.toUni(handler -> {
+            String response = "ACK" + (messageId != null ? "\n" + messageId : "");
+            handler.handle(serverWebSocket.writeTextMessage(response));
+        });
     }
 
-    private void onNack(ServerWebSocket serverWebSocket, Throwable error, String messageId) {
-        String response = "NACK" + (messageId != null ? "\n" + messageId : "");
-        String logMessage = "Failed to process incoming web socket message."
-                + (messageId != null ? "Message id: " + messageId : "");
-        log(error, logMessage);
-        serverWebSocket.writeTextMessage(response);
+    private Uni<Void> onNack(ServerWebSocket serverWebSocket, Throwable error, String messageId) {
+        return AsyncResultUni.toUni(handler -> {
+            String response = "NACK" + (messageId != null ? "\n" + messageId : "");
+            String logMessage = "Failed to process incoming web socket message."
+                    + (messageId != null ? "Message id: " + messageId : "");
+            log(error, logMessage);
+            handler.handle(serverWebSocket.writeTextMessage(response));
+        });
     }
 
     private void onUnexpectedError(ServerWebSocket serverWebSocket, Throwable error, String message) {
