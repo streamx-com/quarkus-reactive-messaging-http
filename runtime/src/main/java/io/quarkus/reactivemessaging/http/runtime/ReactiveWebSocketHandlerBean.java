@@ -64,7 +64,8 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
                                             emitter.emit(new WebSocketMessage<>(
                                                     payload, requestMetadata,
                                                     () -> onAck(serverWebSocket, messageId).subscribeAsCompletionStage(),
-                                                    error -> onNack(serverWebSocket, error, messageId).subscribeAsCompletionStage()));
+                                                    error -> onNack(serverWebSocket, error, messageId)
+                                                            .subscribeAsCompletionStage()));
                                         } catch (Exception error) {
                                             guard.dequeue();
                                             onUnexpectedError(serverWebSocket, error, "Emitting message failed");

@@ -44,7 +44,7 @@ class WebSocketSink extends AbstractSink {
     private final String serializer;
     private final SerializerFactoryBase serializerFactory;
     private final AtomicReference<WebSocket> websocket = new AtomicReference<>();
-    private final Map<String, CompletableFuture<Void>> ackById = new ConcurrentHashMap<>();
+    private final Map<String, CompletableFuture<Void>> ackHandlerById = new ConcurrentHashMap<>();
     private final MessageIdProvider messageIdProvider;
 
     WebSocketSink(Vertx vertx, URI uri, String serializer, SerializerFactoryBase serializerFactory,
@@ -83,6 +83,11 @@ class WebSocketSink extends AbstractSink {
 
                 newWs.closeHandler(ignored -> {
                     log.debug("WebSocket disconnected");
+                    ackHandlerById.forEach((id, ackHandler) -> {
+                        log.debugf("WebSocket disconnected: "
+                                + "completing exceptionally ack handler for message id: %s", id);
+                        ackHandler.completeExceptionally(new RuntimeException("WebSocket disconnected"));
+                    });
                     websocket.compareAndSet(newWs, null);
                 });
                 newWs.textMessageHandler(responseText -> {
@@ -107,7 +112,6 @@ class WebSocketSink extends AbstractSink {
         Buffer serialized = serializer.serialize(message.getPayload());
         String messageId = getMessageId(message);
 
-        // TODO clear old entries from map? some leftovers may be cased by the other end errors or no response
         // TODO test how retry in abstract works. is handler below re-run? Test if retry works after change.
         Uni<Void> ack = registerAck(messageId);
         Uni<Void> send = AsyncResultUni.toUni(
@@ -161,7 +165,7 @@ class WebSocketSink extends AbstractSink {
     private Uni<Void> registerAck(String messageId) {
         if (messageId != null) {
             CompletableFuture<Void> completionStage = new CompletableFuture<>();
-            ackById.put(messageId, completionStage);
+            ackHandlerById.put(messageId, completionStage);
             return Uni.createFrom().completionStage(completionStage);
         } else {
             return Uni.createFrom().voidItem();
@@ -169,14 +173,14 @@ class WebSocketSink extends AbstractSink {
     }
 
     private void handleResponse(Response response) {
-        CompletableFuture<Void> ack = ackById.remove(response.messageId());
+        CompletableFuture<Void> ack = ackHandlerById.remove(response.messageId());
         if (ack != null) {
             if (response.isAck()) {
                 log.tracef("Completing ack handler for message id: %s",
                         response.messageId());
                 ack.complete(null);
             } else {
-                log.tracef("Completing ack handler for message id: %s",
+                log.debugf("Completing exceptionally ack handler for message id: %s",
                         response.messageId());
                 ack.completeExceptionally(
                         new RuntimeException("Nack received for message id: " + response.messageId()));
