@@ -13,9 +13,7 @@ import io.quarkus.reactivemessaging.http.runtime.config.ReactiveHttpConfig;
 import io.quarkus.reactivemessaging.http.runtime.config.WebSocketStreamConfig;
 import io.quarkus.reactivemessaging.http.runtime.serializers.DeserializerFactoryBase;
 import io.smallrye.mutiny.Multi;
-import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.MultiEmitter;
-import io.smallrye.mutiny.vertx.AsyncResultUni;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.ext.web.RoutingContext;
@@ -61,16 +59,21 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
                                             RequestMetadata requestMetadata = new RequestMetadata(event);
                                             String messageId = getMessageId(streamConfig.messageIdProvider(), payload,
                                                     requestMetadata);
+                                            log.tracef("Emitting message with id %s from path: %s",
+                                                    messageId, streamConfig.path());
                                             emitter.emit(new WebSocketMessage<>(
                                                     payload, requestMetadata,
-                                                    () -> onAck(serverWebSocket, messageId).subscribeAsCompletionStage(),
-                                                    error -> onNack(serverWebSocket, error, messageId)
-                                                            .subscribeAsCompletionStage()));
+                                                    () -> onAck(serverWebSocket, messageId),
+                                                    error -> onNack(serverWebSocket, error, messageId)));
+                                            log.tracef("Emitted message with id %s from path: %s",
+                                                    messageId, streamConfig.path());
                                         } catch (Exception error) {
                                             guard.dequeue();
                                             onUnexpectedError(serverWebSocket, error, "Emitting message failed");
                                         }
                                     } else {
+                                        log.debugf("Handling request from path %s failed - buffer overflow",
+                                                streamConfig.path());
                                         serverWebSocket.write(Buffer.buffer("BUFFER_OVERFLOW"));
                                     }
                                 });
@@ -98,19 +101,16 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
         return config.getWebSocketConfigs();
     }
 
-    private Uni<Void> onAck(ServerWebSocket serverWebSocket, String messageId) {
-        return AsyncResultUni.toUni(handler -> {
-            handler.handle(serverWebSocket.writeTextMessage(WebSocketResponse.ack(messageId).toString()));
-        });
+    private void onAck(ServerWebSocket serverWebSocket, String messageId) {
+        log.tracef("Ack message with id %s", messageId);
+        serverWebSocket.writeTextMessage(WebSocketResponse.ack(messageId).toString());
     }
 
-    private Uni<Void> onNack(ServerWebSocket serverWebSocket, Throwable error, String messageId) {
-        return AsyncResultUni.toUni(handler -> {
-            String logMessage = "Failed to process incoming web socket message."
-                    + (messageId != null ? "Message id: " + messageId : "");
-            log(error, logMessage);
-            handler.handle(serverWebSocket.writeTextMessage(WebSocketResponse.nack(messageId).toString()));
-        });
+    private void onNack(ServerWebSocket serverWebSocket, Throwable error, String messageId) {
+        String logMessage = "Failed to process incoming web socket message."
+                + (messageId != null ? "Message id: " + messageId : "");
+        log(error, logMessage);
+        serverWebSocket.writeTextMessage(WebSocketResponse.nack(messageId).toString());
     }
 
     private void onUnexpectedError(ServerWebSocket serverWebSocket, Throwable error, String message) {

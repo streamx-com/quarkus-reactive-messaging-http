@@ -1,6 +1,8 @@
 package io.quarkus.reactivemessaging.http.runtime;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -10,16 +12,16 @@ import org.eclipse.microprofile.reactive.messaging.Metadata;
 class WebSocketMessage<PayloadType> implements Message<PayloadType> {
 
     private final PayloadType payload;
-    private final Supplier<CompletionStage<Void>> ackHandler;
-    private final Function<Throwable, CompletionStage<Void>> nackHandler;
+    private final Runnable successHandler;
+    private final Consumer<Throwable> failureHandler;
     private final Metadata metadata;
 
     WebSocketMessage(PayloadType payload, RequestMetadata requestMetadata,
-            Supplier<CompletionStage<Void>> ackHandler,
-            Function<Throwable, CompletionStage<Void>> nackHandler) {
+            Runnable successHandler,
+            Consumer<Throwable> failureHandler) {
         this.payload = payload;
-        this.ackHandler = ackHandler;
-        this.nackHandler = nackHandler;
+        this.successHandler = successHandler;
+        this.failureHandler = failureHandler;
         metadata = Metadata.of(requestMetadata);
     }
 
@@ -35,11 +37,17 @@ class WebSocketMessage<PayloadType> implements Message<PayloadType> {
 
     @Override
     public Supplier<CompletionStage<Void>> getAck() {
-        return ackHandler;
+        return () -> {
+            successHandler.run();
+            return CompletableFuture.completedFuture(null);
+        };
     }
 
     @Override
     public Function<Throwable, CompletionStage<Void>> getNack() {
-        return nackHandler;
+        return error -> {
+            failureHandler.accept(error);
+            return CompletableFuture.completedFuture(null);
+        };
     }
 }

@@ -83,11 +83,7 @@ class WebSocketSink extends AbstractSink {
 
                 newWs.closeHandler(ignored -> {
                     log.debug("WebSocket disconnected");
-                    ackHandlerById.forEach((id, ackHandler) -> {
-                        log.debugf("WebSocket disconnected: "
-                                + "completing exceptionally ack handler for message id: %s", id);
-                        ackHandler.completeExceptionally(new RuntimeException("WebSocket disconnected"));
-                    });
+                    // TODO should connect be synchronized?
                     websocket.compareAndSet(newWs, null);
                 });
                 if (messageIdProvider != null) {
