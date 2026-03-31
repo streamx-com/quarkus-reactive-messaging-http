@@ -83,7 +83,19 @@ class WebSocketSink extends AbstractSink {
 
                 newWs.closeHandler(ignored -> {
                     log.debug("WebSocket disconnected");
+                    // TODO use ackHandlerById by WebSocket to close only handlers related to the
+                    //  closed web socket
                     // TODO should connect be synchronized?
+                    // TODO clear entries completed exceptionally but make sure not not remove
+                    //  entries added in the meantime
+                    ackHandlerById.forEach((id, ackHandler) -> {
+                        if (!ackHandler.isCompletedExceptionally()) {
+                            log.debugf("WebSocket disconnected: "
+                                    + "completing exceptionally ack handler for message id: %s", id);
+                            ackHandler.completeExceptionally(
+                                    new RuntimeException("WebSocket disconnected"));
+                        }
+                    });
                     websocket.compareAndSet(newWs, null);
                 });
                 if (messageIdProvider != null) {
