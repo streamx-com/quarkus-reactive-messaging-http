@@ -59,7 +59,7 @@ public class QuarkusWebSocketConnector implements InboundConnector, OutboundConn
     public static final String NAME = "quarkus-websocket";
 
     static final String DEFAULT_JITTER = "0.5";
-    static final String DEFAULT_MAX_ATTEMPTS_STR = "1";
+    static final String DEFAULT_MAX_ATTEMPTS_STR = "0";
     static final String DEFAULT_MAX_INFLIGHT_MESSAGES = "1";
     static final String DEFAULT_WAIT_FOR_COMPLETION = "true";
 
