@@ -16,7 +16,8 @@ class WebSocketMessage<PayloadType> implements Message<PayloadType> {
     private final Consumer<Throwable> failureHandler;
     private final Metadata metadata;
 
-    WebSocketMessage(PayloadType payload, RequestMetadata requestMetadata, Runnable successHandler,
+    WebSocketMessage(PayloadType payload, RequestMetadata requestMetadata,
+            Runnable successHandler,
             Consumer<Throwable> failureHandler) {
         this.payload = payload;
         this.successHandler = successHandler;

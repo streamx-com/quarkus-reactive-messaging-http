@@ -5,6 +5,8 @@ import java.util.Collection;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 
+import org.eclipse.microprofile.reactive.messaging.Message;
+import org.eclipse.microprofile.reactive.messaging.Metadata;
 import org.jboss.logging.Logger;
 
 import io.quarkus.reactivemessaging.http.runtime.config.ReactiveHttpConfig;
@@ -30,9 +32,12 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
     @Inject
     DeserializerFactoryBase deserializerFactory;
 
+    @Inject
+    MessageIdProviderFactoryBase messageIdProviderFactory;
+
     @Override
     protected void handleRequest(RoutingContext event, MultiEmitter<? super WebSocketMessage<?>> emitter,
-            StrictQueueSizeGuard guard, String path, String deserializerName) {
+            StrictQueueSizeGuard guard, WebSocketStreamConfig streamConfig) {
         event.request().toWebSocket(
                 webSocket -> {
                     if (webSocket.failed()) {
@@ -44,21 +49,31 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
                                     if (emitter == null) {
                                         onUnexpectedError(serverWebSocket, null,
                                                 "No consumer subscribed for messages sent to " +
-                                                        "Reactive Messaging WebSocket endpoint on path: " + path);
+                                                        "Reactive Messaging WebSocket endpoint on path: "
+                                                        + streamConfig.path());
                                     } else if (guard.prepareToEmit()) {
                                         try {
+                                            Object payload = deserializerFactory
+                                                    .getDeserializer(streamConfig.deserializerName())
+                                                    .map(d -> d.deserialize(b)).orElse(b);
+                                            RequestMetadata requestMetadata = new RequestMetadata(event);
+                                            String messageId = getMessageId(streamConfig.messageIdProvider(), payload,
+                                                    requestMetadata);
+                                            log.tracef("Emitting message with id %s from path: %s",
+                                                    messageId, streamConfig.path());
                                             emitter.emit(new WebSocketMessage<>(
-                                                    deserializerFactory.getDeserializer(deserializerName)
-                                                            .map(d -> d.deserialize(b)).orElse(b),
-                                                    new RequestMetadata(event),
-                                                    () -> serverWebSocket.write(Buffer.buffer("ACK")),
-                                                    error -> onUnexpectedError(serverWebSocket, error,
-                                                            "Failed to process incoming web socket message.")));
+                                                    payload, requestMetadata,
+                                                    () -> onAck(serverWebSocket, messageId),
+                                                    error -> onNack(serverWebSocket, error, messageId)));
+                                            log.tracef("Emitted message with id %s from path: %s",
+                                                    messageId, streamConfig.path());
                                         } catch (Exception error) {
                                             guard.dequeue();
                                             onUnexpectedError(serverWebSocket, error, "Emitting message failed");
                                         }
                                     } else {
+                                        log.debugf("Handling request from path %s failed - buffer overflow",
+                                                streamConfig.path());
                                         serverWebSocket.write(Buffer.buffer("BUFFER_OVERFLOW"));
                                     }
                                 });
@@ -68,12 +83,12 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
 
     @Override
     protected String description(WebSocketStreamConfig config) {
-        return String.format("path %s", config.path);
+        return String.format("path %s", config.path());
     }
 
     @Override
     protected String key(WebSocketStreamConfig config) {
-        return config.path;
+        return config.path();
     }
 
     @Override
@@ -86,10 +101,28 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
         return config.getWebSocketConfigs();
     }
 
+    private void onAck(ServerWebSocket serverWebSocket, String messageId) {
+        log.tracef("Ack message with id %s", messageId);
+        serverWebSocket.writeTextMessage(WebSocketResponse.ack(messageId).toString());
+    }
+
+    private void onNack(ServerWebSocket serverWebSocket, Throwable error, String messageId) {
+        String logMessage = "Failed to process incoming web socket message."
+                + (messageId != null ? "Message id: " + messageId : "");
+        log(error, logMessage);
+        serverWebSocket.writeTextMessage(WebSocketResponse.nack(messageId).toString());
+    }
+
     private void onUnexpectedError(ServerWebSocket serverWebSocket, Throwable error, String message) {
         log(error, message);
         // TODO some error message for the client? exception mapper would be best...
         serverWebSocket.close((short) 3500, "Unexpected error while processing the message");
+    }
+
+    private String getMessageId(String messageIdProvider, Object payload, RequestMetadata requestMetadata) {
+        return messageIdProviderFactory.getMessageIdProvider(messageIdProvider)
+                .map(provider -> provider.getMessageId(Message.of(payload, Metadata.of(requestMetadata))))
+                .orElse(null);
     }
 
     private void log(Throwable error, String message) {
@@ -98,7 +131,7 @@ public class ReactiveWebSocketHandlerBean extends ReactiveHandlerBeanBase<WebSoc
     }
 
     Multi<WebSocketMessage<?>> getProcessor(String path) {
-        Bundle<WebSocketMessage<?>> bundle = processors.get(path);
+        Bundle<WebSocketStreamConfig, WebSocketMessage<?>> bundle = processors.get(path);
         if (bundle == null) {
             throw new IllegalStateException("No incoming stream defined for path " + path);
         }

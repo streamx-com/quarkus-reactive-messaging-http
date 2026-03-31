@@ -24,7 +24,9 @@ import org.junit.jupiter.api.extension.RegisterExtension;
 
 import io.quarkus.reactivemessaging.http.runtime.RequestMetadata;
 import io.quarkus.reactivemessaging.utils.VertxFriendlyLock;
+import io.quarkus.reactivemessaging.websocket.TestMessageIdProvider;
 import io.quarkus.reactivemessaging.websocket.WebSocketClient;
+import io.quarkus.reactivemessaging.websocket.WebSocketClient.WsConnection;
 import io.quarkus.reactivemessaging.websocket.source.app.Consumer;
 import io.quarkus.test.QuarkusUnitTest;
 import io.quarkus.test.common.http.TestHTTPResource;
@@ -39,11 +41,15 @@ class WebSocketSourceTest {
     @RegisterExtension
     static final QuarkusUnitTest config = new QuarkusUnitTest()
             .setArchiveProducer(() -> ShrinkWrap.create(JavaArchive.class)
-                    .addClasses(Consumer.class, WebSocketClient.class, VertxFriendlyLock.class))
+                    .addClasses(Consumer.class, WebSocketClient.class, VertxFriendlyLock.class,
+                            TestMessageIdProvider.class))
             .withConfigurationResource("websocket-source-test-application.properties");
 
     @TestHTTPResource("my-ws")
     URI wsSourceUri;
+
+    @TestHTTPResource("my-ws-ack")
+    URI wsSourceForAckUri;
 
     @TestHTTPResource("my-ws-json")
     URI wsSourceForJsonUri;
@@ -69,6 +75,40 @@ class WebSocketSourceTest {
                 .until(() -> consumer.getMessages(), hasSize(1));
         String payload = consumer.getMessages().get(0);
         assertThat(payload).isEqualTo("test-message");
+    }
+
+    @Test
+    void shouldAck() {
+        shouldAckOrNack("test-message", "ACK\nid:test-message");
+    }
+
+    @Test
+    void shouldNack() {
+        shouldAckOrNack("test-message for NACK test", "NACK\nid:test-message for NACK test");
+    }
+
+    void shouldAckOrNack(String testPayload, String expectedResponse) {
+        consumer.pause();
+        WsConnection wsConnection = client.connect(wsSourceForAckUri);
+        wsConnection.send(testPayload);
+
+        await("wait for message to be ack/nack")
+                .atMost(10, TimeUnit.SECONDS)
+                .until(() -> consumer.getMessagesReceived(), hasSize(1));
+        assertThat(wsConnection.getResponses()).isEmpty();
+        assertThat(consumer.getMessages()).isEmpty();
+
+        consumer.resume();
+        await("wait for message to be consumed")
+                .atMost(10, TimeUnit.SECONDS)
+                .untilAsserted(() -> {
+                    assertThat(wsConnection.getResponses()).hasSize(1);
+                    assertThat(consumer.getMessages()).hasSize(1);
+                });
+        String payload = consumer.getMessages().get(0);
+        assertThat(payload).isEqualTo(testPayload);
+        String response = wsConnection.getResponses().get(0);
+        assertThat(response).isEqualTo(expectedResponse);
     }
 
     @Test
@@ -158,7 +198,9 @@ class WebSocketSourceTest {
 
         await("all processing finished")
                 .atMost(10, TimeUnit.SECONDS)
-                .until(() -> connection.getResponses().size(), equalTo(messagesToSend));
+                .until(() -> connection.getResponses().stream()
+                        .filter(response -> "BUFFER_OVERFLOW".equals(response) || "ACK".equals(response)).count(),
+                        equalTo((long) messagesToSend));
 
         assertThat(consumer.getMessages()).hasSize(messagesToSend - expectedFailureCount);
     }

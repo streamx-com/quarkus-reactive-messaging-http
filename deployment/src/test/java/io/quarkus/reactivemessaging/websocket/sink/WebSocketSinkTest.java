@@ -4,7 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.hasSize;
 
+import java.time.Duration;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import jakarta.inject.Inject;
 
@@ -17,6 +20,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
 import io.quarkus.reactivemessaging.utils.ToUpperCaseSerializer;
+import io.quarkus.reactivemessaging.utils.VertxFriendlyLock;
+import io.quarkus.reactivemessaging.websocket.TestMessageIdProvider;
 import io.quarkus.reactivemessaging.websocket.sink.app.WebSocketEmitter;
 import io.quarkus.reactivemessaging.websocket.sink.app.WebSocketEndpoint;
 import io.quarkus.test.QuarkusUnitTest;
@@ -30,7 +35,9 @@ class WebSocketSinkTest {
     @RegisterExtension
     static final QuarkusUnitTest config = new QuarkusUnitTest()
             .setArchiveProducer(() -> ShrinkWrap.create(JavaArchive.class)
-                    .addClasses(WebSocketEndpoint.class, WebSocketEmitter.class, ToUpperCaseSerializer.class))
+                    .addClasses(WebSocketEndpoint.class, WebSocketEmitter.class,
+                            ToUpperCaseSerializer.class, VertxFriendlyLock.class,
+                            TestMessageIdProvider.class))
             .withConfigurationResource("websocket-sink-test-application.properties");
 
     @Inject
@@ -107,6 +114,50 @@ class WebSocketSinkTest {
         await().atMost(10, TimeUnit.SECONDS)
                 .until(() -> webSocketEndpoint.getMessages(), hasSize(2));
         assertThat(webSocketEndpoint.sessionCount()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldAck() {
+        log.debug("shouldAck");
+        shouldAckOrNack("someText for ACK test", 1, 0);
+    }
+
+    @Test
+    void shouldNack() {
+        log.debug("shouldNack");
+        shouldAckOrNack("someText for NACK test", 0, 1);
+    }
+
+    void shouldAckOrNack(String payload, int expectedAckCount, int expectedNackCount) {
+        webSocketEndpoint.pause();
+        AtomicInteger ackCount = new AtomicInteger();
+        AtomicInteger nackCount = new AtomicInteger();
+        Message<String> message = Message.of(payload)
+                .withAck(() -> {
+                    ackCount.incrementAndGet();
+                    return CompletableFuture.completedFuture(null);
+                })
+                .withNack(error -> {
+                    nackCount.incrementAndGet();
+                    return CompletableFuture.completedFuture(null);
+                });
+
+        emitter.sendMessageWithAck(message);
+
+        await().atMost(10, TimeUnit.SECONDS)
+                .until(() -> webSocketEndpoint.getMessages(), hasSize(1));
+        assertThat(webSocketEndpoint.getMessages().get(0)).isEqualTo(payload);
+        await().pollDelay(Duration.ofMillis(100)).untilAsserted(() -> {
+            assertThat(ackCount.get()).isEqualTo(0);
+            assertThat(nackCount.get()).isEqualTo(0);
+        });
+
+        webSocketEndpoint.resume();
+
+        await().untilAsserted(() -> {
+            assertThat(ackCount.get()).isEqualTo(expectedAckCount);
+            assertThat(nackCount.get()).isEqualTo(expectedNackCount);
+        });
     }
 
     // TODO: test retry mechanism when STOMP or similar protocol is implemented
