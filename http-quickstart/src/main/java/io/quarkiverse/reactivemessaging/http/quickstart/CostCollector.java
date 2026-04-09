@@ -12,8 +12,9 @@ public class CostCollector {
     private double sum = 0;
 
     @POST
-    public synchronized void consumeCost(String valueAsString) {
+    public synchronized String consumeCost(String valueAsString) {
         sum += Double.parseDouble(valueAsString);
+        return "ACK";
     }
 
     @GET
