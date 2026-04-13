@@ -1,5 +1,6 @@
 package io.quarkus.reactivemessaging.http.runtime;
 
+import java.util.Objects;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -44,9 +45,7 @@ class StrictQueueSizeGuard {
     }
 
     void putInQueue(Runnable event) {
-        if (event == null) {
-            throw new IllegalArgumentException("Element can't be null!");
-        }
+        event = Objects.requireNonNull(event);
         queue.offer(event);
     }
 

@@ -55,52 +55,66 @@ public class ReactiveHttpHandlerBean extends ReactiveHandlerBeanBase<HttpStreamC
 
     @Override
     protected void handleRequest(RoutingContext event, MultiEmitter<? super HttpMessage<?>> emitter,
-            StrictQueueSizeGuard guard, String path, String deserializerName) {
+            StrictQueueSizeGuard guard, String path, String deserializerName, boolean twoFaceResponseFlow) {
         if (emitter == null) {
-            onUnexpectedError(event, null,
+            onUnexpectedError(event, twoFaceResponseFlow, null,
                     "No consumer subscribed for messages sent to Reactive Messaging HTTP endpoint on path: " + path);
         } else if (guard.prepareToEmit()) {
             try {
-                guard.putInQueue(() -> statusEvent(event));
+                if (twoFaceResponseFlow) {
+                    guard.putInQueue(() -> statusEvent(event));
+                }
                 emitter.emit(new HttpMessage<>(
                         deserializerFactory.getDeserializer(deserializerName)
                                 .map(d -> d.deserialize(event.body().buffer()))
                                 .orElse(event.body().buffer()),
                         new IncomingHttpMetadata(event),
                         () -> {
-                            ackEvent(event);
+                            ackEvent(event, twoFaceResponseFlow);
                         },
-                        error -> onUnexpectedError(event, error, "Failed to process message")));
+                        error -> onUnexpectedError(event, twoFaceResponseFlow, error, "Failed to process message")));
             } catch (Exception any) {
                 guard.dequeue();
-                onUnexpectedError(event, any, "Emitting message failed");
+                onUnexpectedError(event, twoFaceResponseFlow, any, "Emitting message failed");
             }
         } else {
-            nackEvent(event);
+            nackEvent(event, twoFaceResponseFlow);
         }
     }
 
-    private void onUnexpectedError(RoutingContext event, Throwable error, String message) {
-        nackEvent(event);
+    private void onUnexpectedError(RoutingContext event, boolean twoFaceResponseFlow, Throwable error, String message) {
+        nackEvent(event, twoFaceResponseFlow);
         log.error(message + (error != null ? ": " + error.getMessage() : ""));
         log.debug(message, error);
     }
 
-    protected void ackEvent(RoutingContext event) {
-        if (!event.response().ended()) {
-            if (event.response().getStatusCode() == 200) {
-                event.response().setStatusCode(202);
+    protected void ackEvent(RoutingContext event, boolean twoFaceResponseFlow) {
+        if (twoFaceResponseFlow) {
+            if (!event.response().ended()) {
+                if (event.response().getStatusCode() == 200) {
+                    event.response().setStatusCode(202);
+                }
+                event.response().end("ACK");
             }
-            event.response().end("ACK");
+        } else {
+            if (!event.response().ended()) {
+                event.response().setStatusCode(202).end();
+            }
         }
     }
 
-    protected void nackEvent(RoutingContext event) {
-        if (!event.response().ended()) {
-            if (event.response().getStatusCode() == 200) {
-                event.response().setStatusCode(503);
+    protected void nackEvent(RoutingContext event, boolean twoFaceResponseFlow) {
+        if (twoFaceResponseFlow) {
+            if (!event.response().ended()) {
+                if (event.response().getStatusCode() == 200) {
+                    event.response().setStatusCode(503);
+                }
+                event.response().end("NACK");
             }
-            event.response().end("NACK");
+        } else {
+            if (!event.response().ended()) {
+                event.response().setStatusCode(503).end();
+            }
         }
     }
 
@@ -112,7 +126,7 @@ public class ReactiveHttpHandlerBean extends ReactiveHandlerBeanBase<HttpStreamC
             if (!event.response().isChunked()) {
                 event.response().setChunked(true);
             }
-            event.response().write("");
+            event.response().write("RCV");
         }
     }
 

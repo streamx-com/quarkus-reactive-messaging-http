@@ -1,7 +1,11 @@
 package io.quarkus.reactivemessaging.http.sink.app;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -9,25 +13,27 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
-import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
-import jakarta.ws.rs.sse.Sse;
-import jakarta.ws.rs.sse.SseEventSink;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
 
 @ApplicationScoped
 @Path("/processing-endpoint")
 public class HttpProcessingEndpoint {
 
-    private List<SseEventSink> clients = new CopyOnWriteArrayList<>();
+    private static boolean IS_TESTED = true;
+
+    private List<BlockingQueue<String>> queues = new CopyOnWriteArrayList<>();
     private ReadWriteLock consumptionLock = new ReentrantReadWriteLock();
 
-    @Context
-    Sse sse;
-
     @POST
-    @Produces(MediaType.SERVER_SENT_EVENTS)
-    public void handlePost(@Context SseEventSink sink) {
-        clients.add(sink);
+    @Produces(MediaType.TEXT_PLAIN)
+    public Response handlePost() throws IOException {
+
+        BlockingQueue<String> queue = new LinkedBlockingQueue<>();
+        queue.offer("RCV");
+
+        queues.add(queue);
 
         try {
             consumptionLock.readLock().lock();
@@ -35,35 +41,53 @@ public class HttpProcessingEndpoint {
             consumptionLock.readLock().unlock();
         }
 
-        sink.send(sse.newEvent("Hello"));
+        StreamingOutput streamingOutput = output -> {
+            while (IS_TESTED) {
+                try {
+                    String chunk = queue.poll(2, TimeUnit.SECONDS);
+                    if (chunk.equals("DONE")) {
+                        break;
+                    }
+                    if (chunk != null) {
+                        output.write(chunk.getBytes());
+                        output.flush();
+                    }
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+
+            }
+        };
+
+        return Response.ok(streamingOutput)
+                .status(202)
+                .build();
     }
 
     public int getSize() {
-        return clients.size();
+        return queues.size();
     }
 
     public void ackAll() {
-        for (SseEventSink client : clients) {
-            client.send(sse.newEvent("ACK"));
+        for (BlockingQueue<String> queue : queues) {
+            queue.offer("ACK");
         }
     }
 
     public void nackAll() {
-        for (SseEventSink client : clients) {
-            client.send(sse.newEvent("NACK"));
+        for (BlockingQueue<String> queue : queues) {
+            queue.offer("NACK");
         }
     }
 
     public void closeStreams() {
-        for (SseEventSink client : clients) {
-            if (!client.isClosed()) {
-                client.close();
-            }
+        for (BlockingQueue<String> queue : queues) {
+            queue.offer("DONE");
         }
     }
 
     public void clearList() {
-        clients.clear();
+        queues.clear();
     }
 
     @SuppressWarnings("LockAcquiredButNotSafelyReleased")
@@ -73,6 +97,14 @@ public class HttpProcessingEndpoint {
 
     public void resume() {
         consumptionLock.writeLock().unlock();
+    }
+
+    public void turnOffTestLoop() {
+        IS_TESTED = false;
+    }
+
+    public void turnOnTestLoop() {
+        IS_TESTED = true;
     }
 
 }

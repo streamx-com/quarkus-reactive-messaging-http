@@ -53,6 +53,7 @@ import io.vertx.core.http.HttpVersion;
 @ConnectorAttribute(name = "protocolVersion", type = "string", direction = OUTGOING, description = "HTTP protocol version.", defaultValue = "HTTP_1_1")
 
 @ConnectorAttribute(name = "method", type = "string", direction = INCOMING_AND_OUTGOING, description = "The HTTP method (either `POST` or `PUT`)", defaultValue = "POST")
+@ConnectorAttribute(name = "twoFaceResponseFlow", type = "boolean", direction = INCOMING_AND_OUTGOING, description = "Determines if fwo face response flow should be used.", defaultValue = QuarkusHttpConnector.DEFAULT_TWO_FACE_RESPONSE_FLOW_STR)
 @ConnectorAttribute(name = "path", type = "string", direction = INCOMING, description = "The path of the endpoint", mandatory = true)
 @ConnectorAttribute(name = "buffer-size", type = "string", direction = INCOMING, description = "HTTP endpoint buffers messages if a consumer is not able to keep up. This setting specifies the size of the buffer.", defaultValue = QuarkusHttpConnector.DEFAULT_SOURCE_BUFFER_STR)
 @ConnectorAttribute(name = "broadcast", type = "boolean", direction = INCOMING, description = "Whether the messages should be dispatched to multiple consumers", defaultValue = "false")
@@ -66,10 +67,13 @@ public class QuarkusHttpConnector implements InboundConnector, OutboundConnector
     static final String DEFAULT_MAX_ATTEMPTS_STR = "0";
     static final String DEFAULT_MAX_INFLIGHT_MESSAGES = "1";
     static final String DEFAULT_WAIT_FOR_COMPLETION = "true";
+    static final String DEFAULT_TWO_FACE_RESPONSE_FLOW_STR = "false";
 
     static final String DEFAULT_SOURCE_BUFFER_STR = "8";
 
     public static final Integer DEFAULT_SOURCE_BUFFER = Integer.valueOf(DEFAULT_SOURCE_BUFFER_STR);
+    public static final boolean DEFAULT_TWO_FACE_RESPONSE_FLOW = Boolean.valueOf(
+            DEFAULT_TWO_FACE_RESPONSE_FLOW_STR);
 
     public static final String NAME = "quarkus-http";
 
@@ -139,6 +143,7 @@ public class QuarkusHttpConnector implements InboundConnector, OutboundConnector
         Optional<Integer> maxWaitQueueSize = config.getMaxWaitQueueSize();
         long inflights = config.getMaxInflightMessages();
         boolean waitForCompletion = config.getWaitForCompletion();
+        boolean twoFaceResponseFlow = config.getTwoFaceResponseFlow();
         HttpVersion protocolVersion = getProtocolVersion(config.getProtocolVersion());
 
         double jitter;
@@ -152,7 +157,7 @@ public class QuarkusHttpConnector implements InboundConnector, OutboundConnector
                 tlsRegistry.isResolvable() ? Optional.of(tlsRegistry.get()) : Optional.empty());
         HttpSink httpSink = new HttpSink(vertx, method, url, serializer, maxRetries, jitter, delay, maxPoolSize,
                 maxWaitQueueSize,
-                serializerFactory, tlsConfiguration, inflights, waitForCompletion, protocolVersion);
+                serializerFactory, tlsConfiguration, inflights, waitForCompletion, protocolVersion, twoFaceResponseFlow);
         sinks.add(httpSink);
         return httpSink.sink();
     }

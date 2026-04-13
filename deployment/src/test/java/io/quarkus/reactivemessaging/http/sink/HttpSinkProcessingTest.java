@@ -13,6 +13,7 @@ import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.shrinkwrap.api.ShrinkWrap;
 import org.jboss.shrinkwrap.api.spec.JavaArchive;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
@@ -35,6 +36,11 @@ public class HttpSinkProcessingTest {
             .setArchiveProducer(() -> ShrinkWrap.create(JavaArchive.class)
                     .addClasses(HttpProcessingEndpoint.class, HttpProcessingEmitter.class, Dto.class))
             .withConfigurationResource("http-sink-processing-test-application.properties");
+
+    @BeforeEach
+    public void setup() {
+        httpProcessingEndpoint.turnOnTestLoop();
+    }
 
     //  @Disabled
     @Test
@@ -66,7 +72,7 @@ public class HttpSinkProcessingTest {
 
         await().pollDelay(3, TimeUnit.SECONDS).untilAsserted(
                 () -> assertThat(ackCounter.get()).isEqualTo(0));
-        assertThat(nackCounter.get()).isEqualTo(0);
+        assertThat(nackCounter.get()).isEqualTo(MESSAGE_COUNT);
     }
 
     //  @Disabled
@@ -171,6 +177,7 @@ public class HttpSinkProcessingTest {
     public void cleanUp() {
         httpProcessingEndpoint.closeStreams();
         httpProcessingEndpoint.clearList();
+        httpProcessingEndpoint.turnOffTestLoop();
     }
 
 }

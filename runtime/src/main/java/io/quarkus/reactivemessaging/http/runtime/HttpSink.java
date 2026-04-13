@@ -1,7 +1,5 @@
 package io.quarkus.reactivemessaging.http.runtime;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
@@ -15,6 +13,7 @@ import java.util.stream.Collectors;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
 
+import io.netty.handler.codec.http.QueryStringEncoder;
 import io.quarkus.reactivemessaging.http.runtime.config.TlsConfig;
 import io.quarkus.reactivemessaging.http.runtime.serializers.Serializer;
 import io.quarkus.reactivemessaging.http.runtime.serializers.SerializerFactoryBase;
@@ -54,8 +53,9 @@ class HttpSink extends AbstractSink {
             Optional<TlsConfiguration> tlsConfiguration,
             long inflights,
             boolean waitForCompletion,
-            HttpVersion protocolVersion) {
-        super(log, url, maxRetries, jitter, delay, inflights, waitForCompletion);
+            HttpVersion protocolVersion,
+            boolean twoFaceResponseFlow) {
+        super(log, url, maxRetries, jitter, delay, inflights, waitForCompletion, twoFaceResponseFlow);
         this.method = method;
         this.url = url;
         this.serializerFactory = serializerFactory;
@@ -93,11 +93,15 @@ class HttpSink extends AbstractSink {
     }
 
     private Uni<Void> invoke(Message<?> message, HttpClientRequest request, Buffer buffer) {
+        log.debugf("Invoking request: ", toString(request, buffer));
         return request.send(buffer).onItem().transform(response -> {
-            response
-                    .toMulti()
-                    .subscribe().with(item -> handleBuffer(message, request, response, item),
-                            message::nack, () -> {});
+            if (this.twoFaceResponseFlow) {
+                response
+                        .toMulti()
+                        .subscribe().with(item -> handleBuffer(message, request, response, item),
+                                message::nack, () -> {
+                                });
+            }
 
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 return null;
@@ -110,14 +114,20 @@ class HttpSink extends AbstractSink {
 
     private void handleBuffer(Message<?> message, HttpClientRequest request,
             HttpClientResponse response, Buffer buf) {
-        // TODO: to fix? to make a part of multi
         String body = buf.toString().strip();
-        if (body.endsWith("NACK")) {
+        if (body.equals("NACK")) {
             message.nack(new VertxException(
                     "Http request: " + toString(request) + " failed with response: " + toString(
                             response)));
-        } else if (body.endsWith("ACK")) {
+        } else if (body.equals("ACK")) {
             message.ack();
+        } else if (body.equals("RCV")) {
+            // skip, this is our body
+        } else {
+            String logMessage = "Http request: " + toString(request) + " returned unexpected body: [" + buf + "] for response:"
+                    + toString(response);
+            message.nack(new VertxException(logMessage));
+            log.warnf(logMessage);
         }
     }
 
@@ -197,23 +207,16 @@ class HttpSink extends AbstractSink {
             return;
         }
 
-        String currentUri = request.getURI();
-        StringBuilder sb = new StringBuilder(currentUri);
-        boolean hasQuery = currentUri.contains("?");
+        QueryStringEncoder encoder = new QueryStringEncoder(request.getURI());
 
         for (Entry<String, List<String>> entry : query.entrySet()) {
             String key = entry.getKey();
             for (String value : entry.getValue()) {
-                sb.append(hasQuery ? "&" : "?");
-                hasQuery = true;
-
-                sb.append(URLEncoder.encode(key, StandardCharsets.UTF_8))
-                        .append("=")
-                        .append(URLEncoder.encode(value, StandardCharsets.UTF_8));
+                encoder.addParam(key, value);
             }
         }
 
-        request.setURI(sb.toString());
+        request.setURI(encoder.toString());
     }
 
     private void addHeaders(HttpClientRequest request, Map<String, List<String>> httpHeaders) {

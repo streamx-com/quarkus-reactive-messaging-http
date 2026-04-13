@@ -73,7 +73,10 @@ public class ReactiveHttpConfig {
                 int bufferSize = getConfigProperty(IN_KEY, connectorName, "buffer-size",
                         QuarkusHttpConnector.DEFAULT_SOURCE_BUFFER, Integer.class);
                 String deserializerName = getConfigProperty(IN_KEY, connectorName, "deserializer", null, String.class);
-                streamConfigs.add(new HttpStreamConfig(path, method, connectorName, bufferSize, deserializerName));
+                boolean twoFaceResponseFlow = getConfigProperty(IN_KEY, connectorName, "twoFaceResponseFlow",
+                        QuarkusHttpConnector.DEFAULT_TWO_FACE_RESPONSE_FLOW, Boolean.class);
+                streamConfigs.add(
+                        new HttpStreamConfig(path, method, connectorName, bufferSize, deserializerName, twoFaceResponseFlow));
             }
         }
         return streamConfigs;
