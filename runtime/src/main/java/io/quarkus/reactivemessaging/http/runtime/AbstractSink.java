@@ -16,12 +16,12 @@ abstract class AbstractSink {
 
     private final SenderProcessor processor;
     private final Flow.Subscriber<? extends Message<?>> subscriber;
-    protected final boolean twoFaceResponseFlow;
+    protected final boolean twoPhaseResponseFlow;
 
     public AbstractSink(Logger log, String url,
             int maxRetries, double jitter, Optional<Duration> delay,
-            long inflights, boolean waitForCompletion, boolean twoFaceResponseFlow) {
-        this.twoFaceResponseFlow = twoFaceResponseFlow;
+            long inflights, boolean waitForCompletion, boolean twoPhaseResponseFlow) {
+        this.twoPhaseResponseFlow = twoPhaseResponseFlow;
         if (inflights <= 0) {
             throw new IllegalArgumentException("Inflights must be greater than 0, but was " + inflights);
         }
@@ -37,7 +37,7 @@ abstract class AbstractSink {
                 send = retry.atMost(maxRetries);
             }
 
-            if (twoFaceResponseFlow) {
+            if (twoPhaseResponseFlow) {
                 return handleStatus(m, send);
             } else {
                 return handleAcknowledgment(log, url, m, send);

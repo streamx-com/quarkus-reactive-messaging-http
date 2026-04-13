@@ -55,13 +55,13 @@ public class ReactiveHttpHandlerBean extends ReactiveHandlerBeanBase<HttpStreamC
 
     @Override
     protected void handleRequest(RoutingContext event, MultiEmitter<? super HttpMessage<?>> emitter,
-            StrictQueueSizeGuard guard, String path, String deserializerName, boolean twoFaceResponseFlow) {
+            StrictQueueSizeGuard guard, String path, String deserializerName, boolean twoPhaseResponseFlow) {
         if (emitter == null) {
-            onUnexpectedError(event, twoFaceResponseFlow, null,
+            onUnexpectedError(event, twoPhaseResponseFlow, null,
                     "No consumer subscribed for messages sent to Reactive Messaging HTTP endpoint on path: " + path);
         } else if (guard.prepareToEmit()) {
             try {
-                if (twoFaceResponseFlow) {
+                if (twoPhaseResponseFlow) {
                     guard.putInQueue(() -> statusEvent(event));
                 }
                 emitter.emit(new HttpMessage<>(
@@ -70,26 +70,26 @@ public class ReactiveHttpHandlerBean extends ReactiveHandlerBeanBase<HttpStreamC
                                 .orElse(event.body().buffer()),
                         new IncomingHttpMetadata(event),
                         () -> {
-                            ackEvent(event, twoFaceResponseFlow);
+                            ackEvent(event, twoPhaseResponseFlow);
                         },
-                        error -> onUnexpectedError(event, twoFaceResponseFlow, error, "Failed to process message")));
+                        error -> onUnexpectedError(event, twoPhaseResponseFlow, error, "Failed to process message")));
             } catch (Exception any) {
                 guard.dequeue();
-                onUnexpectedError(event, twoFaceResponseFlow, any, "Emitting message failed");
+                onUnexpectedError(event, twoPhaseResponseFlow, any, "Emitting message failed");
             }
         } else {
-            nackEvent(event, twoFaceResponseFlow);
+            nackEvent(event, twoPhaseResponseFlow);
         }
     }
 
-    private void onUnexpectedError(RoutingContext event, boolean twoFaceResponseFlow, Throwable error, String message) {
-        nackEvent(event, twoFaceResponseFlow);
+    private void onUnexpectedError(RoutingContext event, boolean twoPhaseResponseFlow, Throwable error, String message) {
+        nackEvent(event, twoPhaseResponseFlow);
         log.error(message + (error != null ? ": " + error.getMessage() : ""));
         log.debug(message, error);
     }
 
-    protected void ackEvent(RoutingContext event, boolean twoFaceResponseFlow) {
-        if (twoFaceResponseFlow) {
+    protected void ackEvent(RoutingContext event, boolean twoPhaseResponseFlow) {
+        if (twoPhaseResponseFlow) {
             if (!event.response().ended()) {
                 if (event.response().getStatusCode() == 200) {
                     event.response().setStatusCode(202);
@@ -103,8 +103,8 @@ public class ReactiveHttpHandlerBean extends ReactiveHandlerBeanBase<HttpStreamC
         }
     }
 
-    protected void nackEvent(RoutingContext event, boolean twoFaceResponseFlow) {
-        if (twoFaceResponseFlow) {
+    protected void nackEvent(RoutingContext event, boolean twoPhaseResponseFlow) {
+        if (twoPhaseResponseFlow) {
             if (!event.response().ended()) {
                 if (event.response().getStatusCode() == 200) {
                     event.response().setStatusCode(503);

@@ -26,7 +26,7 @@ abstract class ReactiveHandlerBeanBase<ConfigType extends StreamConfigBase, Mess
         if (bundle != null) {
             MultiEmitter<? super MessageType> emitter = bundle.emitter;
             StrictQueueSizeGuard guard = bundle.guard;
-            handleRequest(event, emitter, guard, bundle.path, bundle.deserializerName, bundle.twoFaceResponseFlow);
+            handleRequest(event, emitter, guard, bundle.path, bundle.deserializerName, bundle.twoPhaseResponseFlow);
         } else {
             event.response().setStatusCode(404).end();
         }
@@ -40,13 +40,13 @@ abstract class ReactiveHandlerBeanBase<ConfigType extends StreamConfigBase, Mess
                 // emitter with an unbounded queue, we control the size ourselves, with the guard
                 .<MessageType> emitter(bundle::setEmitter, BackPressureStrategy.BUFFER)
                 .onItem().invoke(guard::dequeue);
-        if (streamConfig.twoFaceResponseFlow) {
+        if (streamConfig.twoPhaseResponseFlow) {
             processor = processor.onRequest().invoke(guard::removeFromQueue);
         }
         bundle.setProcessor(processor);
         bundle.setPath(streamConfig.path);
         bundle.setDeserializerName(streamConfig.deserializerName);
-        bundle.setTwoFaceResponseFlow(streamConfig.twoFaceResponseFlow);
+        bundle.setTwoPhaseResponseFlow(streamConfig.twoPhaseResponseFlow);
 
         Bundle<MessageType> previousProcessor = processors.put(key(streamConfig), bundle);
         if (previousProcessor != null) {
@@ -55,7 +55,7 @@ abstract class ReactiveHandlerBeanBase<ConfigType extends StreamConfigBase, Mess
     }
 
     protected abstract void handleRequest(RoutingContext event, MultiEmitter<? super MessageType> emitter,
-            StrictQueueSizeGuard guard, String path, String deseralizerName, boolean twoFaceResponseFlow);
+            StrictQueueSizeGuard guard, String path, String deseralizerName, boolean twoPhaseResponseFlow);
 
     protected abstract String description(ConfigType streamConfig);
 
@@ -71,7 +71,7 @@ abstract class ReactiveHandlerBeanBase<ConfigType extends StreamConfigBase, Mess
         private MultiEmitter<? super MessageType> emitter; // effectively final
         private String path;
         private String deserializerName;
-        private boolean twoFaceResponseFlow;
+        private boolean twoPhaseResponseFlow;
 
         private Bundle(StrictQueueSizeGuard guard) {
             this.guard = guard;
@@ -101,8 +101,8 @@ abstract class ReactiveHandlerBeanBase<ConfigType extends StreamConfigBase, Mess
             this.deserializerName = deserializerName;
         }
 
-        public void setTwoFaceResponseFlow(boolean twoFaceResponseFlow) {
-            this.twoFaceResponseFlow = twoFaceResponseFlow;
+        public void setTwoPhaseResponseFlow(boolean twoPhaseResponseFlow) {
+            this.twoPhaseResponseFlow = twoPhaseResponseFlow;
         }
     }
 }

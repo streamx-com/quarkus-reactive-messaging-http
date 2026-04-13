@@ -8,8 +8,8 @@ public class HttpStreamConfig extends StreamConfigBase {
     public final HttpMethod method;
 
     public HttpStreamConfig(String path, String method, String name, int bufferSize, String deserializerName,
-            boolean twoFaceResponseFlow) {
-        super(bufferSize, path, deserializerName, twoFaceResponseFlow);
+            boolean twoPhaseResponseFlow) {
+        super(bufferSize, path, deserializerName, twoPhaseResponseFlow);
         this.method = toHttpMethod(method, name);
     }
 

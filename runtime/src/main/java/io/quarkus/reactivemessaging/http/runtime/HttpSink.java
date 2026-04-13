@@ -54,8 +54,8 @@ class HttpSink extends AbstractSink {
             long inflights,
             boolean waitForCompletion,
             HttpVersion protocolVersion,
-            boolean twoFaceResponseFlow) {
-        super(log, url, maxRetries, jitter, delay, inflights, waitForCompletion, twoFaceResponseFlow);
+            boolean twoPhaseResponseFlow) {
+        super(log, url, maxRetries, jitter, delay, inflights, waitForCompletion, twoPhaseResponseFlow);
         this.method = method;
         this.url = url;
         this.serializerFactory = serializerFactory;
@@ -95,7 +95,7 @@ class HttpSink extends AbstractSink {
     private Uni<Void> invoke(Message<?> message, HttpClientRequest request, Buffer buffer) {
         log.debugf("Invoking request: ", toString(request, buffer));
         return request.send(buffer).onItem().transform(response -> {
-            if (this.twoFaceResponseFlow) {
+            if (this.twoPhaseResponseFlow) {
                 response
                         .toMulti()
                         .subscribe().with(item -> handleBuffer(message, request, response, item),
