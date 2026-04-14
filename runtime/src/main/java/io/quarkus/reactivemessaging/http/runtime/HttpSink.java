@@ -14,6 +14,7 @@ import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
 
 import io.netty.handler.codec.http.QueryStringEncoder;
+import io.opentelemetry.api.internal.StringUtils;
 import io.quarkus.reactivemessaging.http.runtime.config.TlsConfig;
 import io.quarkus.reactivemessaging.http.runtime.serializers.Serializer;
 import io.quarkus.reactivemessaging.http.runtime.serializers.SerializerFactoryBase;
@@ -124,7 +125,8 @@ class HttpSink extends AbstractSink {
         } else if (body.equals("RCV")) {
             // skip, this is our body
         } else {
-            String logMessage = "Http request: " + toString(request) + " returned unexpected body: [" + buf + "] for response:"
+            String logMessage = "Http request: " + toString(request) + " returned unexpected body: [" + truncateBuffer(buf)
+                    + "] for response:"
                     + toString(response);
             message.nack(new VertxException(logMessage));
             log.warnf(logMessage);
@@ -136,11 +138,27 @@ class HttpSink extends AbstractSink {
     }
 
     private String toString(HttpClientRequest req, Buffer buffer) {
-        return toString(req) + " Body: " + buffer;
+        return toString(req) + " Body: " + truncateBuffer(buffer);
     }
 
     private String toString(HttpClientResponse resp) {
         return "Code: " + resp.statusCode() + " Message: " + resp.statusMessage();
+    }
+
+    private String truncateBuffer(Buffer buffer) {
+        String bufferString = buffer.toString();
+        String suffix = "...";
+        int maxLength = 20;
+
+        if (StringUtils.isNullOrEmpty(bufferString)) {
+            return bufferString;
+        }
+
+        if (bufferString.length() <= maxLength) {
+            return bufferString;
+        }
+
+        return bufferString.substring(0, maxLength) + "...";
     }
 
     private Uni<HttpClientRequest> toHttpRequest(Message<?> message) {
