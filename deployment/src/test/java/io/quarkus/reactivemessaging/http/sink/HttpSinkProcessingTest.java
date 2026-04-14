@@ -70,7 +70,7 @@ public class HttpSinkProcessingTest {
 
         httpProcessingEndpoint.closeStreams();
 
-        await().pollDelay(3, TimeUnit.SECONDS).untilAsserted(
+        await().pollDelay(300, TimeUnit.MILLISECONDS).untilAsserted(
                 () -> assertThat(ackCounter.get()).isEqualTo(0));
         assertThat(nackCounter.get()).isEqualTo(MESSAGE_COUNT);
     }
@@ -163,7 +163,7 @@ public class HttpSinkProcessingTest {
         }
 
         try {
-            await().pollDelay(3, TimeUnit.SECONDS)
+            await().pollDelay(300, TimeUnit.MILLISECONDS)
                     .untilAsserted(() -> assertThat(httpProcessingEndpoint.getSize()).isEqualTo(1));
         } finally {
             httpProcessingEndpoint.resume();

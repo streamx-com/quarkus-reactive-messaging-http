@@ -17,6 +17,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.StreamingOutput;
 
+import org.codehaus.plexus.util.StringUtils;
+
 @ApplicationScoped
 @Path("/processing-endpoint")
 public class HttpProcessingEndpoint {
@@ -44,11 +46,11 @@ public class HttpProcessingEndpoint {
         StreamingOutput streamingOutput = output -> {
             while (isTested) {
                 try {
-                    String chunk = queue.poll(2, TimeUnit.SECONDS);
-                    if (chunk.equals("DONE")) {
+                    String chunk = queue.poll(200, TimeUnit.MILLISECONDS);
+                    if ("DONE".equals(chunk)) {
                         break;
                     }
-                    if (chunk != null) {
+                    if (StringUtils.isNotEmpty(chunk)) {
                         output.write(chunk.getBytes());
                         output.flush();
                     }
