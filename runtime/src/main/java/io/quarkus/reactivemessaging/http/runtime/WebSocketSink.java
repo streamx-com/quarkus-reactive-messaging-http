@@ -44,7 +44,7 @@ class WebSocketSink extends AbstractSink {
     WebSocketSink(Vertx vertx, URI uri, String serializer, SerializerFactoryBase serializerFactory,
             int maxRetries, Optional<Duration> delay, double jitter,
             Optional<TlsConfiguration> tlsConfiguration, long inflights, boolean waitForCompletion) {
-        super(log, uri.toString(), maxRetries, jitter, delay, inflights, waitForCompletion);
+        super(log, uri.toString(), maxRetries, jitter, delay, inflights, waitForCompletion, false);
         this.uri = uri;
         this.serializerFactory = serializerFactory;
         this.serializer = serializer;

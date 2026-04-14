@@ -16,10 +16,12 @@ abstract class AbstractSink {
 
     private final SenderProcessor processor;
     private final Flow.Subscriber<? extends Message<?>> subscriber;
+    protected final boolean twoPhaseResponseFlow;
 
     public AbstractSink(Logger log, String url,
             int maxRetries, double jitter, Optional<Duration> delay,
-            long inflights, boolean waitForCompletion) {
+            long inflights, boolean waitForCompletion, boolean twoPhaseResponseFlow) {
+        this.twoPhaseResponseFlow = twoPhaseResponseFlow;
         if (inflights <= 0) {
             throw new IllegalArgumentException("Inflights must be greater than 0, but was " + inflights);
         }
@@ -35,18 +37,38 @@ abstract class AbstractSink {
                 send = retry.atMost(maxRetries);
             }
 
-            return send
-                    .onItemOrFailure().transformToUni((result, error) -> {
-                        if (error != null) {
-                            return Uni.createFrom().completionStage(
-                                    m.nack(error).thenRun(() -> log.debugf(error, "Error responding to %s", url)));
-                        }
-                        return Uni.createFrom()
-                                .completionStage(m.ack().thenRun(() -> log.tracef("Responded with success to %s", url)));
-                    });
+            if (twoPhaseResponseFlow) {
+                return handleStatus(m, send);
+            } else {
+                return handleAcknowledgment(log, url, m, send);
+            }
+
         });
         this.subscriber = MultiUtils.via(processor,
                 m -> m.onFailure().invoke(f -> log.debugf("Unable to dispatch message to %s", url)));
+    }
+
+    private static Uni<Void> handleStatus(Message<?> m, Uni<Void> send) {
+        return send.onItemOrFailure().transformToUni((result, error) -> {
+            if (error != null) {
+                return Uni.createFrom().completionStage(m.nack(error));
+            }
+            return Uni.createFrom().voidItem();
+        });
+    }
+
+    private static Uni<Void> handleAcknowledgment(Logger log, String url, Message<?> m, Uni<Void> send) {
+        return send
+                .onItemOrFailure().transformToUni((result, error) -> {
+                    if (error != null) {
+                        return Uni.createFrom().completionStage(
+                                m.nack(error)
+                                        .thenRun(() -> log.debugf(error, "Error responding to %s", url)));
+                    }
+                    return Uni.createFrom()
+                            .completionStage(
+                                    m.ack().thenRun(() -> log.tracef("Responded with success to %s", url)));
+                });
     }
 
     protected abstract Uni<Void> send(Message<?> message);

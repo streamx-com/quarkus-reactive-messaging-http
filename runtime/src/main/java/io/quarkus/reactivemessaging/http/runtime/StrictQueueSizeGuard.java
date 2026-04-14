@@ -1,5 +1,7 @@
 package io.quarkus.reactivemessaging.http.runtime;
 
+import java.util.Objects;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -8,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 class StrictQueueSizeGuard {
     private final int queueSize;
     private final AtomicInteger enqueued = new AtomicInteger();
+    private final ConcurrentLinkedQueue<Runnable> queue = new ConcurrentLinkedQueue<>();
 
     /**
      * @param queueSize size of the queue
@@ -38,6 +41,21 @@ class StrictQueueSizeGuard {
             } else {
                 return false; // too many messages to enqueue
             }
+        }
+    }
+
+    void putInQueue(Runnable event) {
+        event = Objects.requireNonNull(event);
+        queue.offer(event);
+    }
+
+    void removeFromQueue(long count) {
+        for (long i = 0; i < count; i++) {
+            Runnable event = queue.poll();
+            if (event == null) {
+                return;
+            }
+            event.run();
         }
     }
 }
