@@ -21,7 +21,7 @@ import jakarta.ws.rs.core.StreamingOutput;
 @Path("/processing-endpoint")
 public class HttpProcessingEndpoint {
 
-    private static boolean IS_TESTED = true;
+    private static boolean isTested = true;
 
     private List<BlockingQueue<String>> queues = new CopyOnWriteArrayList<>();
     private ReadWriteLock consumptionLock = new ReentrantReadWriteLock();
@@ -42,7 +42,7 @@ public class HttpProcessingEndpoint {
         }
 
         StreamingOutput streamingOutput = output -> {
-            while (IS_TESTED) {
+            while (isTested) {
                 try {
                     String chunk = queue.poll(2, TimeUnit.SECONDS);
                     if (chunk.equals("DONE")) {
@@ -100,11 +100,11 @@ public class HttpProcessingEndpoint {
     }
 
     public void turnOffTestLoop() {
-        IS_TESTED = false;
+        isTested = false;
     }
 
     public void turnOnTestLoop() {
-        IS_TESTED = true;
+        isTested = true;
     }
 
 }
